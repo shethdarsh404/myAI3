@@ -120,7 +120,31 @@ function formatNumber(n: number) {
 function clamp(n: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, n));
 }
+/* ---------------- small UI helpers ---------------- */
 
+function formatNumber(n: number) {
+  if (!n && n !== 0) return "—";
+  return Math.round(n).toString();
+}
+
+function clamp(n: number, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, n));
+}
+
+/* ----------- dateFmt FIX (Option B: Short Date Only) ----------- */
+// Formats ISO timestamps for saved conversation list
+function dateFmt(iso?: string): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleDateString([], {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
 /* ---------------- parse nutrients from text ----------------
   Accepts text like:
    "Grilled paneer bowl — 420 kcal, 30g protein, 40g carbs, 10g fat"
