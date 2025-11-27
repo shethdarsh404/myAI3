@@ -476,8 +476,8 @@ export default function ChatPage() {
             </div>
 
             <div className="mt-3 flex gap-2">
-              <button className="px-3 py-2 rounded-md bg-emerald-700 text-white" onClick={() => addComposerToLog()}>Add composer → Log</button>
-              <button className="px-3 py-2 rounded-md border border-slate-200" onClick={() => addLastAssistantToLog()}>Add last assistant → Log</button>
+              <button className="px-3 py-2 rounded-md bg-emerald-700 text-white" onClick={() => addComposerToLog()}>Add Data from Prompt</button>
+              <button className="px-3 py-2 rounded-md border border-slate-200" onClick={() => addLastAssistantToLog()}>Add Last Data</button>
               <button className="px-3 py-2 rounded-md text-sm" onClick={() => { const empty = { dateIso: todayIso(), kcal: 0, protein: 0, carbs: 0, fat: 0 }; persistToday(empty); toast.success("Reset"); }}>Reset</button>
             </div>
 
