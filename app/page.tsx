@@ -48,20 +48,71 @@ function dateFmt(iso?: string) {
 
 /* ---------------- parse nutrients from text ---------------- */
 
+/**
+ * Robust nutrient parsing:
+ * - Prefer label-based extraction (e.g., "Protein: 17 g", "Calories: 303 kcal", "Carbohydrates: 17 g", "Fat: 9 g")
+ * - Also handle "30g protein" / "420 kcal" patterns
+ * - Avoid matching ingredient weights earlier in the text by focusing on words "protein", "carb(s)", "fat", "calories"/"kcal"
+ */
 function parseNutrientsFromText(text: string | undefined | null) {
   if (!text) return null;
   const lower = text.toLowerCase();
-  const kcalMatch = lower.match(/(\d{2,5})\s?kcal/);
-  const proteinMatch = lower.match(/(\d{1,4})\s?g\s?(?:protein)?/);
-  const carbsMatch = lower.match(/(\d{1,4})\s?g\s?(?:carb|carbs|carbohydrate)?/);
-  const fatMatch = lower.match(/(\d{1,4})\s?g\s?(?:fat)?/);
 
-  const kcal = kcalMatch ? Number(kcalMatch[1]) : null;
-  const protein = proteinMatch ? Number(proteinMatch[1]) : null;
-  const carbs = carbsMatch ? Number(carbsMatch[1]) : null;
-  const fat = fatMatch ? Number(fatMatch[1]) : null;
+  // Helper to extract using label-first pattern: label: ≈? 17 g  OR label ≈17 g
+  const extractLabelNumber = (labelRegex: RegExp) => {
+    const m = lower.match(labelRegex);
+    if (m && m[1]) {
+      const num = Number(m[1].replace(/[~,≈\s]+/g, ""));
+      if (!Number.isNaN(num)) return num;
+    }
+    return null;
+  };
 
-  return { kcal, protein, carbs, fat };
+  // Patterns
+  const kcalLabelRegex = /(?:calories|calorie|kcal)[:\s]*[≈~]?\s*([0-9]{2,5}(?:\.[0-9]+)?)/i;
+  const proteinLabelRegex = /protein[:\s]*[≈~]?\s*([0-9]{1,4}(?:\.[0-9]+)?)/i;
+  const carbsLabelRegex = /(carbohydrates|carbohydrate|carbs|carb)[:\s]*[≈~]?\s*([0-9]{1,4}(?:\.[0-9]+)?)/i;
+  const fatLabelRegex = /fat[:\s]*[≈~]?\s*([0-9]{1,4}(?:\.[0-9]+)?)/i;
+
+  // Also try the reversed form: "30g protein" or "30 g protein"
+  const numberThenProtein = /([0-9]{1,4}(?:\.[0-9]+)?)\s?g\s*(?:protein)\b/i;
+  const numberThenCarbs = /([0-9]{1,4}(?:\.[0-9]+)?)\s?g\s*(?:carbs|carb|carbohydrates|carbohydrate)\b/i;
+  const numberThenFat = /([0-9]{1,4}(?:\.[0-9]+)?)\s?g\s*(?:fat)\b/i;
+  const kcalInline = /([0-9]{2,5}(?:\.[0-9]+)?)\s?kcal\b/i;
+
+  // Try label style first
+  let kcal = extractLabelNumber(kcalLabelRegex);
+  let protein = extractLabelNumber(proteinLabelRegex);
+  let carbs = extractLabelNumber(carbsLabelRegex);
+  let fat = extractLabelNumber(fatLabelRegex);
+
+  // If any are missing, try reversed "30g protein" style
+  if (protein == null) {
+    const m = lower.match(numberThenProtein);
+    if (m && m[1]) protein = Number(m[1]);
+  }
+  if (carbs == null) {
+    const m = lower.match(numberThenCarbs);
+    if (m && m[1]) carbs = Number(m[1]);
+  }
+  if (fat == null) {
+    const m = lower.match(numberThenFat);
+    if (m && m[1]) fat = Number(m[1]);
+  }
+  if (kcal == null) {
+    const m = lower.match(kcalInline);
+    if (m && m[1]) kcal = Number(m[1]);
+  }
+
+  // Final sanity: ensure numeric or null and round to nearest integer
+  const toIntOrNull = (v: any) => (v == null ? null : Math.round(Number(v)));
+
+  return {
+    kcal: toIntOrNull(kcal),
+    protein: toIntOrNull(protein),
+    carbs: toIntOrNull(carbs),
+    fat: toIntOrNull(fat),
+  };
 }
 
 /* ---------------- today log persistence ---------------- */
@@ -161,7 +212,7 @@ export default function ChatPage() {
     if (!parsed) { toast.error("Could not parse nutrients from text"); return; }
     let { kcal, protein, carbs, fat } = parsed;
     // if only kcal given, crudely estimate macros proportionally to goals
-    if (kcal && (!protein && !carbs && !fat)) {
+    if (kcal && (protein == null && carbs == null && fat == null)) {
       const totalGoalCals = goals.kcal || 2000;
       const proteinCals = (goals.proteinG || 0) * 4;
       const fatCals = (goals.fatG || 0) * 9;
