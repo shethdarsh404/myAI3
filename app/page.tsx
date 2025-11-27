@@ -16,12 +16,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 import { UIMessage } from "ai";
 import { useEffect, useRef, useState } from "react";
-import {
-  AI_NAME,
-  CLEAR_CHAT_TEXT,
-  OWNER_NAME,
-  WELCOME_MESSAGE,
-} from "@/config";
+import { AI_NAME, CLEAR_CHAT_TEXT, OWNER_NAME, WELCOME_MESSAGE } from "@/config";
 
 import Link from "next/link";
 
@@ -48,7 +43,7 @@ function clamp(n: number, min = 0, max = 100) {
   return Math.max(min, Math.min(max, n));
 }
 
-// Option B: short date only
+// short date only
 function dateFmt(iso?: string): string {
   if (!iso) return "";
   try {
@@ -189,12 +184,12 @@ function ProgressBar({ value, target, color = "#34D399" }: { value: number; targ
   const pct = target > 0 ? clamp((value / target) * 100, 0, 200) : 0;
   return (
     <div>
-      <div className="flex items-center justify-between text-xs text-slate-600 mb-1">
-        <div>{formatNumber(value)}</div>
-        <div>{formatNumber(target)}</div>
+      <div className="flex items-center justify-between text-xs text-slate-600 mb-2">
+        <div className="font-medium" style={{ color: "#0f172a" }}>{Math.round(value)} g</div>
+        <div className="text-xs text-slate-400">{Math.round(target)} g</div>
       </div>
-      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-        <div style={{ width: `${pct}%`, background: color, height: "100%", transition: "width 500ms ease" }} />
+      <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
+        <div style={{ width: `${pct}%`, background: color, height: "100%", transition: "width 400ms ease" }} />
       </div>
     </div>
   );
@@ -256,6 +251,7 @@ export default function ChatPage() {
 
   // refs
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const welcomeShownRef = useRef(false);
 
   // form
@@ -291,9 +287,25 @@ export default function ChatPage() {
     } catch {}
   }, [messages, durations, isClient]);
 
-  // auto-scroll when messages change
+  // auto-scroll (smart)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    try {
+      const container = messagesContainerRef.current;
+      if (!container) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        return;
+      }
+
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      const NEAR_BOTTOM_THRESHOLD = 150; // px tolerance
+
+      if (distanceFromBottom <= NEAR_BOTTOM_THRESHOLD) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+      // otherwise preserve user's scroll
+    } catch (e) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages]);
 
   const handleDurationChange = (key: string, duration: number) => {
@@ -342,12 +354,13 @@ export default function ChatPage() {
   }
 
   function addToTodayLog({ kcal = 0, protein = 0, carbs = 0, fat = 0 }: { kcal?: number; protein?: number; carbs?: number; fat?: number }) {
+    const current = loadTodayLog();
     const next: TodayLog = {
       dateIso: todayIso(),
-      kcal: Math.round((todayLog.kcal || 0) + (kcal || 0)),
-      protein: Math.round((todayLog.protein || 0) + (protein || 0)),
-      carbs: Math.round((todayLog.carbs || 0) + (carbs || 0)),
-      fat: Math.round((todayLog.fat || 0) + (fat || 0)),
+      kcal: Math.round((current.kcal || 0) + (kcal || 0)),
+      protein: Math.round((current.protein || 0) + (protein || 0)),
+      carbs: Math.round((current.carbs || 0) + (carbs || 0)),
+      fat: Math.round((current.fat || 0) + (fat || 0)),
     };
     persistTodayLog(next);
     toast.success("Added to today's log");
@@ -445,16 +458,6 @@ export default function ChatPage() {
 
   /* ---------------- derived values for UI ---------------- */
 
-  const latestCalories = (() => {
-    const txt = messages
-      .map((m) => (m.parts && m.parts.length ? m.parts.map((p: any) => p.text).join(" ") : (m as any).text || ""))
-      .join(" ");
-    const match = txt.match(/(\d{2,4})\s?k?c?a?l?/i);
-    return match ? Number(match[1]) : null;
-  })();
-
-  const calorieProgress = Math.min(100, goals.kcal ? ((todayLog.kcal || 0) / goals.kcal) * 100 : 0);
-
   const quickPrompts = [
     "Create a 1800 kcal vegetarian day plan",
     "High-protein snack ideas",
@@ -474,7 +477,7 @@ export default function ChatPage() {
       <main className="max-w-7xl mx-auto p-6 grid grid-cols-12 gap-6">
         {/* LEFT: profile + saved convs */}
         <aside className="col-span-12 lg:col-span-3 flex flex-col gap-4">
-          <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+          <div className="card p-4">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-lg bg-emerald-50 flex items-center justify-center text-xl">🥗</div>
@@ -484,34 +487,34 @@ export default function ChatPage() {
                 </div>
               </div>
               <div>
-                <Button variant="outline" size="sm" onClick={() => { document.getElementById("profile-name")?.focus(); }}>Edit</Button>
+                <button className="btn-outline" onClick={() => { document.getElementById("profile-name")?.focus(); }}>Edit</button>
               </div>
             </div>
 
             <div className="mt-3 space-y-2 text-sm">
               <label className="flex flex-col">
                 <span className="text-xs text-slate-500">Name</span>
-                <input id="profile-name" value={profile.name || ""} onChange={(e) => updateProfileField({ name: e.target.value })} className="mt-1 p-2 rounded border border-slate-100" />
+                <input id="profile-name" value={profile.name || ""} onChange={(e) => updateProfileField({ name: e.target.value })} className="input mt-1" />
               </label>
 
               <div className="grid grid-cols-3 gap-2">
                 <label className="flex flex-col text-xs">
                   <span className="text-slate-500">Age</span>
-                  <input value={profile.age || ""} onChange={(e) => updateProfileField({ age: e.target.value })} className="mt-1 p-2 rounded border border-slate-100" />
+                  <input value={profile.age || ""} onChange={(e) => updateProfileField({ age: e.target.value })} className="input mt-1" />
                 </label>
                 <label className="flex flex-col text-xs">
                   <span className="text-slate-500">Height (cm)</span>
-                  <input value={profile.heightCm || ""} onChange={(e) => updateProfileField({ heightCm: e.target.value })} className="mt-1 p-2 rounded border border-slate-100" />
+                  <input value={profile.heightCm || ""} onChange={(e) => updateProfileField({ heightCm: e.target.value })} className="input mt-1" />
                 </label>
                 <label className="flex flex-col text-xs">
                   <span className="text-slate-500">Weight (kg)</span>
-                  <input value={profile.weightKg || ""} onChange={(e) => updateProfileField({ weightKg: e.target.value })} className="mt-1 p-2 rounded border border-slate-100" />
+                  <input value={profile.weightKg || ""} onChange={(e) => updateProfileField({ weightKg: e.target.value })} className="input mt-1" />
                 </label>
               </div>
 
               <label className="flex flex-col text-xs">
                 <span className="text-slate-500">Activity level</span>
-                <select value={profile.activity || "Moderate"} onChange={(e) => updateProfileField({ activity: e.target.value })} className="mt-1 p-2 rounded border border-slate-100">
+                <select value={profile.activity || "Moderate"} onChange={(e) => updateProfileField({ activity: e.target.value })} className="input mt-1">
                   <option>Sedentary</option>
                   <option>Light</option>
                   <option>Moderate</option>
@@ -520,18 +523,18 @@ export default function ChatPage() {
               </label>
 
               <div className="flex items-center gap-2 mt-2">
-                <Button size="sm" variant="outline" onClick={() => {
+                <button className="btn-outline text-sm" onClick={() => {
                   const est = estimateGoalsFromProfile(profile);
                   setGoals(est);
                   saveGoals(est);
                   toast.success("Goals estimated from profile");
-                }}>Estimate goals</Button>
-                <Button size="sm" onClick={() => { setProfile({ name: "", age: "", heightCm: "", weightKg: "", activity: "Moderate" }); localStorage.removeItem(PROFILE_KEY); toast.success("Profile cleared"); }}>Reset</Button>
+                }}>Estimate goals</button>
+                <button className="btn-ghost text-sm" onClick={() => { setProfile({ name: "", age: "", heightCm: "", weightKg: "", activity: "Moderate" }); localStorage.removeItem(PROFILE_KEY); toast.success("Profile cleared"); }}>Reset</button>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm flex-1 overflow-auto">
+          <div className="card p-4 flex-1 overflow-auto">
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm font-semibold text-slate-800">Past chats</div>
               <div className="text-xs text-slate-500">{savedConversations.length} saved</div>
@@ -545,7 +548,10 @@ export default function ChatPage() {
                   <li key={c.id} className="p-2 rounded-lg border border-slate-100 hover:bg-slate-50 flex items-center justify-between">
                     <div>
                       <button onClick={() => loadConversation(c)} className="text-sm font-medium text-slate-800 text-left">{c.title}</button>
-                      <div className="text-xs text-slate-500">{dateFmt(c.createdAt)}</div>
+                      <div className="text-xs text-slate-400">{dateFmt(c.createdAt)}</div>
+                      <div className="text-xs text-slate-500 mt-1 line-clamp-2">
+                        {c.messages?.length ? (c.messages[c.messages.length - 1].parts?.map((p: any) => p.text).join(" ") || "").slice(0, 90) : ""}
+                      </div>
                     </div>
                     <div className="flex flex-col gap-1 items-end">
                       <button onClick={() => loadConversation(c)} className="text-xs px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">Open</button>
@@ -560,7 +566,7 @@ export default function ChatPage() {
 
         {/* CENTER chat */}
         <section className="col-span-12 lg:col-span-6 flex flex-col gap-4">
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 flex items-center justify-between">
+          <div className="card p-5 flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center text-2xl">🥗</div>
               <div>
@@ -570,12 +576,12 @@ export default function ChatPage() {
             </div>
 
             <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm" onClick={saveCurrentConversation}><PlusIcon className="size-4 mr-1" />Save</Button>
-              <Button variant="outline" size="sm" onClick={clearChat}><Eraser className="size-4 mr-1" />Clear</Button>
+              <button className="btn-outline" onClick={saveCurrentConversation}><PlusIcon className="size-4 mr-1" /> Save</button>
+              <button className="btn-outline" onClick={clearChat}><Eraser className="size-4 mr-1" /> Clear</button>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-lg border border-slate-100 flex flex-col h-[72vh] overflow-hidden">
+          <div className="bg-white rounded-xl shadow-lg border border-slate-100 flex flex-col h-[72vh] overflow-hidden">
             <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Avatar>
@@ -591,9 +597,9 @@ export default function ChatPage() {
               <div className="text-xs text-slate-500">Status: {status}</div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 py-5">
+            <div className="flex-1 overflow-y-auto px-4 py-5" ref={messagesContainerRef}>
               <div className="max-w-3xl mx-auto flex flex-col gap-4">
-                <MessageWall messages={messages} status={status} durations={durations} onDurationChange={handleDurationChange} />
+                <MessageWall messages={messages} status={status} durations={durations} onDurationChange={handleDurationChange} onAddToLog={parseAndAddFromText} />
 
                 {isTyping && (
                   <div className="flex items-center gap-3 text-sm text-slate-500">
@@ -622,15 +628,15 @@ export default function ChatPage() {
                         }} />
 
                         {(status === "ready" || status === "error") && (
-                          <Button type="submit" size="icon" className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-white shadow-md" disabled={!field.value.trim()}>
+                          <button type="submit" className="btn-primary rounded-full" disabled={!field.value.trim()}>
                             <ArrowUp className="size-4 text-white" />
-                          </Button>
+                          </button>
                         )}
 
                         {(status === "streaming" || status === "submitted") && (
-                          <Button size="icon" className="rounded-full bg-slate-100" onClick={() => stop()}>
+                          <button type="button" className="btn-outline rounded-full" onClick={() => stop()}>
                             <Square className="size-4 text-slate-700" />
-                          </Button>
+                          </button>
                         )}
                       </Field>
                     )}
@@ -638,7 +644,7 @@ export default function ChatPage() {
                 </FieldGroup>
 
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {["Meal plan", "Calories", "Recipe", "Veg", "Keto"].map((chip) => (
+                  {quickPrompts.map((chip) => (
                     <button key={chip} type="button" onClick={() => { form.setValue("message", chip); toast.success("Prompt loaded — press Enter to send"); }} className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-sm hover:bg-emerald-100 transition">
                       {chip}
                     </button>
@@ -651,7 +657,7 @@ export default function ChatPage() {
 
         {/* RIGHT: Today's snapshot + suggested meals */}
         <aside className="col-span-12 lg:col-span-3 flex flex-col gap-5">
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+          <div className="card p-5">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-slate-800">Today's snapshot</h3>
@@ -703,56 +709,115 @@ export default function ChatPage() {
             <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
               <label className="flex flex-col text-xs">
                 <span className="text-slate-500">Calorie goal</span>
-                <input type="number" value={goals.kcal} onChange={(e) => { const next = { ...goals, kcal: Number(e.target.value) }; setGoals(next); }} className="mt-1 p-2 rounded border border-slate-100" />
+                <input
+                  type="number"
+                  className="input mt-1"
+                  value={goals.kcal ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const n = raw === "" ? 0 : Number(raw);
+                    const next = { ...goals, kcal: Number(n) };
+                    setGoals(next);
+                  }}
+                />
               </label>
+
               <label className="flex flex-col text-xs">
                 <span className="text-slate-500">Protein (g)</span>
-                <input type="number" value={goals.proteinG} onChange={(e) => { const next = { ...goals, proteinG: Number(e.target.value) }; setGoals(next); }} className="mt-1 p-2 rounded border border-slate-100" />
+                <input
+                  type="number"
+                  className="input mt-1"
+                  value={goals.proteinG ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const n = raw === "" ? 0 : Number(raw);
+                    const next = { ...goals, proteinG: Number(n) };
+                    setGoals(next);
+                  }}
+                />
               </label>
+
               <label className="flex flex-col text-xs">
                 <span className="text-slate-500">Carbs (g)</span>
-                <input type="number" value={goals.carbsG} onChange={(e) => { const next = { ...goals, carbsG: Number(e.target.value) }; setGoals(next); }} className="mt-1 p-2 rounded border border-slate-100" />
+                <input
+                  type="number"
+                  className="input mt-1"
+                  value={goals.carbsG ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const n = raw === "" ? 0 : Number(raw);
+                    const next = { ...goals, carbsG: Number(n) };
+                    setGoals(next);
+                  }}
+                />
               </label>
+
               <label className="flex flex-col text-xs">
                 <span className="text-slate-500">Fat (g)</span>
-                <input type="number" value={goals.fatG} onChange={(e) => { const next = { ...goals, fatG: Number(e.target.value) }; setGoals(next); }} className="mt-1 p-2 rounded border border-slate-100" />
+                <input
+                  type="number"
+                  className="input mt-1"
+                  value={goals.fatG ?? ""}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    const n = raw === "" ? 0 : Number(raw);
+                    const next = { ...goals, fatG: Number(n) };
+                    setGoals(next);
+                  }}
+                />
               </label>
             </div>
 
             <div className="mt-3 flex gap-2">
-              <Button size="sm" onClick={() => addComposerToLog()}>Add composer → Log</Button>
-              <Button size="sm" variant="outline" onClick={() => addLastAssistantMessageToLog()}>Add last assistant → Log</Button>
-              <Button size="sm" variant="ghost" onClick={() => resetTodayLog()}>Reset</Button>
+              <button className="btn-primary text-sm" onClick={() => addComposerToLog()}>Add composer → Log</button>
+              <button className="btn-outline text-sm" onClick={() => addLastAssistantMessageToLog()}>Add last assistant → Log</button>
+              <button className="btn-ghost text-sm" onClick={() => resetTodayLog()}>Reset</button>
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-800">Suggested meals</h3>
-            <ul className="mt-3 space-y-3">
+          {/* Minimalistic suggested meals */}
+          <div className="card p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-800">Suggested meals</h3>
+              <div className="text-xs text-slate-400">Quick add</div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-3">
               {[
                 { title: "Grilled paneer bowl", kcal: 420, protein: 30, carbs: 40, fat: 10 },
                 { title: "Quinoa salad with roasted veg", kcal: 350, protein: 12, carbs: 50, fat: 10 },
                 { title: "Chickpea curry + brown rice", kcal: 560, protein: 20, carbs: 80, fat: 12 },
               ].map((m) => (
-                <li key={m.title} className="flex items-center justify-between p-3 rounded-lg bg-white border border-slate-100 shadow-sm">
+                <div key={m.title} className="flex items-center justify-between p-3 rounded-md border border-slate-100 bg-white">
                   <div>
                     <div className="text-sm font-medium text-slate-800">{m.title}</div>
-                    <div className="text-xs text-slate-500">{m.kcal} kcal — {m.protein}g P / {m.carbs}g C / {m.fat}g F</div>
+                    <div className="text-xs text-slate-500 mt-1">{m.kcal} kcal · {m.protein}g P · {m.carbs}g C</div>
                   </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <button className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-sm" onClick={() => { form.setValue("message", `${m.title} — ${m.kcal} kcal, ${m.protein}g protein, ${m.carbs}g carbs, ${m.fat}g fat`); toast.success("Loaded into composer"); }}>
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="btn-outline text-xs"
+                      onClick={() => {
+                        form.setValue("message", `${m.title} — ${m.kcal} kcal, ${m.protein}g protein, ${m.carbs}g carbs, ${m.fat}g fat`);
+                        toast.success("Loaded into composer");
+                      }}
+                    >
                       Load
                     </button>
-                    <button className="px-3 py-1 rounded-full bg-emerald-600 text-white text-sm" onClick={() => { addToTodayLog({ kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat }); }}>
-                      Add to today's log
+                    <button
+                      className="btn-primary text-xs"
+                      onClick={() => {
+                        addToTodayLog({ kcal: m.kcal, protein: m.protein, carbs: m.carbs, fat: m.fat });
+                      }}
+                    >
+                      Add
                     </button>
                   </div>
-                </li>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
 
-          <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 text-xs text-slate-500">
+          <div className="card p-4 text-xs text-slate-500">
             © {new Date().getFullYear()} {OWNER_NAME} • <Link href="/terms" className="underline">Terms</Link>
           </div>
         </aside>
