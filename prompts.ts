@@ -2,22 +2,23 @@
 import { DATE_AND_TIME, OWNER_NAME, AI_NAME } from './config';
 
 /**
- * NutriBuddy-enhanced prompt.ts
+ * prompt.ts — NutriBuddy system & prompt helpers
  *
  * - Keeps your original prompt structure and labels.
- * - Adds domain-specific NutriBuddy instructions (calorie logging, recipe suggestions, JSON schema).
- * - Exports buildMessages(...) to produce a messages array ready for a chat model.
- * - Exports parseAssistantJson(...) for robust JSON extraction from assistant replies.
- *
- * Usage:
- *   import prompt from './prompt';
- *   const messages = prompt.buildMessages({ userName: 'Riya', userProfile: {...}, sessionState: {...}, userMessage: 'I ate 2 eggs' });
- *   send messages to your chat model.
+ * - Adds clear NutriBuddy instructions to collect mandatory profile info first:
+ *     -> name, age, weight (kg), exercise routine (activity level)
+ *     -> then dietary / meal preferences (veg / non-veg / vegan / gluten-free / jain / etc.)
+ * - If any required profile fields are missing, the assistant must ask them before attempting to log food,
+ *   suggest meals, or compute kcal progress.
+ * - When app requests structured data (requireJSONResponse=true), assistant MUST return only valid JSON using
+ *   the schema in NUTRIBUDDY_GUIDANCE.
+ * - Exports buildMessages(...) and parseAssistantJson(...) helpers.
  */
 
 /* -------------------------------
-   Small types used by helpers
+   Types
    ------------------------------- */
+
 export type MealItem = {
   name: string;
   quantity?: string;
@@ -35,7 +36,7 @@ export type UserProfile = {
   weight_kg?: number;
   activity_level?: 'sedentary' | 'light' | 'moderate' | 'active' | 'very active';
   daily_kcal_goal?: number;
-  dietary_preferences?: string[];
+  dietary_preferences?: string[]; // e.g., ['vegetarian', 'gluten-free', 'jain']
   allergies?: string[];
 };
 
@@ -55,7 +56,7 @@ export type BuildMessagesOptions = {
 };
 
 /* -------------------------------
-   Your original sections (kept & extended)
+   Your original prompt sections
    ------------------------------- */
 
 export const IDENTITY_PROMPT = `
@@ -86,40 +87,62 @@ export const COURSE_CONTEXT_PROMPT = `
 `.trim();
 
 /* -------------------------------
-   NutriBuddy domain-specific guidance
+   NutriBuddy guidance & onboarding requirements
    ------------------------------- */
 
 export const NUTRIBUDDY_GUIDANCE = `
-You are NutriBuddy — a friendly nutrition & meal-planning assistant with these core responsibilities:
- - Log food items and estimate calories and macros when asked.
- - Keep track of the user's daily kcal progress vs their goal.
- - Suggest recipes and meals based on ingredients provided and dietary preferences.
- - Ask focused clarifying questions when key details are missing (e.g., portion size, brand, or preparation method).
- - When asked to output structured data (the app will set requireJSONResponse=true), respond with ONLY valid JSON that follows the schema described below.
+You are NutriBuddy — a friendly nutrition & meal-planning assistant.
 
-JSON schema (the assistant must follow when app requests JSON):
+Primary rules (mandatory):
+1) BEFORE performing any calorie calculations, logging, or personalized meal suggestions, ensure the user's profile includes:
+   - name
+   - age
+   - weight_kg (weight in kilograms)
+   - activity_level (one of: sedentary, light, moderate, active, very active)
+2) AFTER collecting the fields above, ask for dietary / meal preferences (one or more): vegetarian, non-vegetarian, vegan, gluten-free, jain, lactose-intolerant, etc.
+3) Only when the above onboarding fields are present should the assistant proceed to:
+   - log foods and calculate totals
+   - suggest recipes personalized to preferences and activity level
+   - set or change daily kcal goals
+
+Behavior when fields are missing:
+ - If any required onboarding field is missing, ask only the missing onboarding questions in a friendly, concise way.
+ - When the app requests structured JSON (requireJSONResponse=true), respond with ONLY valid JSON following the schema below. If onboarding fields are missing, return an intent 'ask_clarifying' with follow_up.questions listing exactly the missing fields as focused questions.
+
+JSON schema (must be followed when JSON requested):
 {
   "intent": "<string: one of log_food | suggest_meal | get_snapshot | set_goal | greet | farewell | ask_clarifying | info | generic>",
-  "fulfillment_text": "<human-friendly reply (string)>",
-  "data": { /* intent-specific payload: see examples below */ },
+  "fulfillment_text": "<string: brief human-friendly reply>",
+  "data": { /* intent-specific payload */ },
   "follow_up": {
     "should_ask": boolean,
     "questions": [ "<question 1>", "<question 2>" ]
   }
 }
 
-Example payloads:
- - log_food: data = { items: [{name, quantity, kcal}], added_kcal, new_total_kcal, goal_kcal, progress_percent }
- - suggest_meal: data = { suggestions: [{title, ingredients, est_kcal, short_prep}], ... }
- - get_snapshot: data = { today_kcal_consumed, remaining_kcal, goal_kcal, top_items }
- - set_goal: data = { new_goal_kcal }
+Onboarding example (assistant MUST follow this flow if missing info):
+- If weight_kg and activity_level are missing:
+  {
+    "intent": "ask_clarifying",
+    "fulfillment_text": "I need a couple of quick details to personalize recommendations.",
+    "data": {},
+    "follow_up": {
+      "should_ask": true,
+      "questions": [
+        "What's your weight in kilograms (kg)?",
+        "How active are you on a typical week? (sedentary, light, moderate, active, very active)"
+      ]
+    }
+  }
 
-Label estimates clearly (e.g., "≈220 kcal") and avoid definitive medical claims.
-If the user requests medical or therapeutic diet advice, refuse to provide specialized medical guidance and recommend a registered dietitian or doctor.
+General notes:
+ - Label calorie estimates clearly with ≈ when approximate.
+ - Do not provide specialized medical or therapeutic diet plans; refer to a registered dietitian or doctor for that.
+ - Ask only focused questions — do not request more info than necessary.
 `.trim();
 
 /* -------------------------------
-   SYSTEM_PROMPT (assembled)
+   System prompt assembly
    ------------------------------- */
 
 export const SYSTEM_PROMPT = `
@@ -155,21 +178,68 @@ ${DATE_AND_TIME}
 `.trim();
 
 /* -------------------------------
-   Few-shot examples (compact)
+   Few-shot / onboarding examples
    ------------------------------- */
 
 const fewShotExamples: { role: 'user' | 'assistant'; content: string }[] = [
+  // User greets with no profile
+  {
+    role: 'user',
+    content: 'Hi — I want to use the app to track my meals.',
+  },
+  {
+    role: 'assistant',
+    content: JSON.stringify({
+      intent: 'ask_clarifying',
+      fulfillment_text: 'Great — I need a few quick details to personalize your experience.',
+      data: {},
+      follow_up: {
+        should_ask: true,
+        questions: [
+          "What's your name?",
+          "How old are you?",
+          "What's your weight in kilograms (kg)?",
+          "How active are you on a typical week? (sedentary, light, moderate, active, very active)",
+          "Do you have any dietary preferences (e.g., vegetarian, non-vegetarian, vegan, gluten-free, jain)?",
+        ],
+      },
+    }),
+  },
+
+  // Partial profile present: ask missing fields only
+  {
+    role: 'user',
+    content: 'My name is Riya and I am vegetarian. My weight is 58 kg.',
+  },
+  {
+    role: 'assistant',
+    content: JSON.stringify({
+      intent: 'ask_clarifying',
+      fulfillment_text:
+        "Thanks, Riya — just two quick questions to finish setup before I can personalize suggestions.",
+      data: {},
+      follow_up: {
+        should_ask: true,
+        questions: [
+          "How old are you?",
+          "How active are you on a typical week? (sedentary, light, moderate, active, very active)",
+        ],
+      },
+    }),
+  },
+
+  // After onboarding complete: log food example
   {
     role: 'user',
     content:
-      'Hi, my daily calorie goal is 2000 kcal. I had 2 boiled eggs and one slice whole wheat toast this morning. Please log that.',
+      'I am Riya, 28 years old, weigh 58 kg, activity level moderate, vegetarian. I had 2 boiled eggs and a slice of toast — log it.',
   },
   {
     role: 'assistant',
     content: JSON.stringify({
       intent: 'log_food',
       fulfillment_text:
-        'Logged 2 boiled eggs (≈156 kcal) and 1 slice whole-wheat toast (≈70 kcal). Added ≈226 kcal to today.',
+        "Logged 2 boiled eggs (≈156 kcal) and 1 slice whole-wheat toast (≈70 kcal). Added ≈226 kcal to today's total.",
       data: {
         items: [
           { name: 'Boiled egg', quantity: '2', kcal: 156 },
@@ -182,45 +252,6 @@ const fewShotExamples: { role: 'user' | 'assistant'; content: string }[] = [
       },
       follow_up: { should_ask: false, questions: [] },
     }),
-  },
-
-  {
-    role: 'user',
-    content: "I have chickpeas, tomatoes, spinach, and oats. Vegetarian — want lunch under 600 kcal. Suggestions?",
-  },
-  {
-    role: 'assistant',
-    content: JSON.stringify({
-      intent: 'suggest_meal',
-      fulfillment_text:
-        'Here are 3 vegetarian lunch ideas under ~600 kcal using those ingredients. Which would you like the recipe for?',
-      data: {
-        suggestions: [
-          {
-            title: 'Chickpea & Spinach Curry with Brown Rice',
-            ingredients: ['chickpeas', 'spinach', 'tomato', 'onion', 'spices', '1/2 cup brown rice'],
-            est_kcal: 520,
-            short_prep: 'Sauté onion, add tomatoes & spices, add chickpeas & spinach, simmer. Serve with cooked brown rice.',
-          },
-          {
-            title: 'Savory Oat & Chickpea Patties with Tomato Chutney',
-            ingredients: ['oats', 'chickpeas', 'spinach', 'tomato', 'garlic'],
-            est_kcal: 470,
-          },
-        ],
-      },
-      follow_up: { should_ask: true, questions: ['Which recipe would you like?'] },
-    }),
-  },
-
-  {
-    role: 'user',
-    content: 'I had a bowl of cereal this morning.',
-  },
-  {
-    role: 'assistant',
-    content:
-      'Could you tell me which cereal (brand) and approximate portion (cups or grams)? If unknown, tell me bowl size (small/medium/large).',
   },
 ];
 
@@ -249,10 +280,9 @@ export function buildMessages(opts: BuildMessagesOptions) {
       : 'Session state: Not provided.';
 
   const jsonInstruction = requireJSONResponse
-    ? `\n\nIMPORTANT: Respond with ONLY valid JSON using the schema in the system prompt. Do NOT include any extra explanatory text.`
+    ? `\n\nIMPORTANT: Respond with ONLY valid JSON using the schema in the system prompt. If any required onboarding fields (name, age, weight_kg, activity_level, dietary_preferences) are missing, return intent 'ask_clarifying' and include focused follow_up.questions for ONLY the missing fields. Do NOT include any additional explanatory text.`
     : `\n\nYou may respond in natural ${language} text. If helpful, include a short JSON payload labeled "assistant_payload".`;
 
-  // messages array formatted for OpenAI-style chat APIs
   const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
     { role: 'system', content: SYSTEM_PROMPT },
     {
@@ -268,12 +298,10 @@ export function buildMessages(opts: BuildMessagesOptions) {
     },
   ];
 
-  // Append few-shot examples
   for (const ex of fewShotExamples) {
     messages.push({ role: ex.role, content: ex.content });
   }
 
-  // Add the live user message
   messages.push({ role: 'user', content: userMessage });
 
   return messages;
@@ -287,9 +315,11 @@ export function parseAssistantJson(text: string) {
   if (!text) return null;
   const trimmed = text.trim();
   try {
+    // direct parse if JSON only
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
       return JSON.parse(trimmed);
     }
+    // otherwise try to extract first {...} block
     const first = trimmed.indexOf('{');
     const last = trimmed.lastIndexOf('}');
     if (first !== -1 && last !== -1 && last > first) {
@@ -303,7 +333,45 @@ export function parseAssistantJson(text: string) {
 }
 
 /* -------------------------------
-   Example builder (exported)
+   Utility: onboarding questions generator
+   ------------------------------- */
+
+/**
+ * Given a partially-complete profile, returns an array of focused questions
+ * for missing onboarding fields. These are phrased to be user-facing.
+ */
+export function getOnboardingQuestions(profile?: UserProfile): string[] {
+  const q: string[] = [];
+  if (!profile) {
+    q.push("What's your name?");
+    q.push("How old are you?");
+    q.push("What's your weight in kilograms (kg)?");
+    q.push(
+      "How active are you on a typical week? (choose one: sedentary, light, moderate, active, very active)"
+    );
+    q.push(
+      "Do you have any dietary preferences (e.g., vegetarian, non-vegetarian, vegan, gluten-free, jain)?"
+    );
+    return q;
+  }
+  if (!profile.name) q.push("What's your name?");
+  if (!profile.age && profile.age !== 0) q.push("How old are you?");
+  if (!profile.weight_kg && profile.weight_kg !== 0) q.push("What's your weight in kilograms (kg)?");
+  if (!profile.activity_level) {
+    q.push(
+      "How active are you on a typical week? (choose one: sedentary, light, moderate, active, very active)"
+    );
+  }
+  if (!profile.dietary_preferences || profile.dietary_preferences.length === 0) {
+    q.push(
+      "Do you have any dietary preferences (e.g., vegetarian, non-vegetarian, vegan, gluten-free, jain)?"
+    );
+  }
+  return q;
+}
+
+/* -------------------------------
+   Example builder
    ------------------------------- */
 
 export const exampleBuild = (() => {
@@ -323,7 +391,6 @@ export const exampleBuild = (() => {
     today_log: [
       { name: 'Boiled egg', quantity: '2', kcal: 156 },
       { name: 'Whole wheat toast', quantity: '1 slice', kcal: 70 },
-      { name: 'Greek yogurt', quantity: '1 cup', kcal: 334 },
     ],
     timezone: 'Asia/Kolkata',
   };
@@ -332,7 +399,7 @@ export const exampleBuild = (() => {
     userName: 'Riya',
     userProfile: sampleProfile,
     sessionState: sampleSession,
-    userMessage: 'I just ate a veg sandwich with cheese. Log it and tell me how close I am to my goal.',
+    userMessage: 'Log 2 boiled eggs and show how close I am to my goal.',
     requireJSONResponse: true,
   });
 })();
@@ -352,5 +419,6 @@ export default {
   SYSTEM_PROMPT,
   buildMessages,
   parseAssistantJson,
+  getOnboardingQuestions,
   exampleBuild,
 };
