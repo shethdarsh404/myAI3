@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -76,8 +77,16 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* Added convenience colors for UI elements (mapped to emerald/neutral tones) */
+  --ui-accent: #10b981;        /* emerald-500 */
+  --ui-accent-dark: #059669;   /* emerald-600 */
+  --ui-muted: #6b7280;         /* slate muted */
+  --ui-card-border: #e6eef1;
+  --ui-card-shadow: 0 6px 18px rgba(16,24,40,0.06);
 }
 
+/* dark overrides kept as-is */
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
@@ -116,10 +125,91 @@
   * {
     @apply border-border outline-ring/50;
   }
+
+  /* Base typography & page background */
+  html, body, #__next {
+    height: 100%;
+  }
+
   body {
     @apply bg-background text-foreground;
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
   }
-  
+
+  /* Card common utility */
+  .card {
+    background: var(--card);
+    color: var(--card-foreground);
+    border: 1px solid var(--ui-card-border);
+    border-radius: var(--radius);
+    box-shadow: var(--ui-card-shadow);
+  }
+
+  /* Button primitives */
+  .btn-primary {
+    background: linear-gradient(180deg, var(--ui-accent), var(--ui-accent-dark));
+    color: white;
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-weight: 600;
+    box-shadow: 0 6px 12px rgba(5,150,105,0.12);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .btn-outline {
+    background: transparent;
+    border: 1px solid var(--ui-card-border);
+    color: var(--foreground);
+    padding: 7px 10px;
+    border-radius: 10px;
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--foreground);
+    padding: 6px 10px;
+    border-radius: 10px;
+  }
+
+  /* Input primitive */
+  .input {
+    border: 1px solid var(--ui-card-border);
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--card);
+    color: var(--card-foreground);
+  }
+
+  .input:focus {
+    outline: none;
+    box-shadow: 0 6px 18px rgba(16,185,129,0.08);
+    border-color: var(--ui-accent-dark);
+  }
+
+  /* subtle thin scrollbars for webkit (chromium / safari) */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(15,23,42,0.06);
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* small UI utilities */
+  .text-muted { color: var(--ui-muted); }
+  .rounded-soft { border-radius: calc(var(--radius) + 6px); }
+
+  /* single-character link style used in your site */
   .single-char-link {
     @apply bg-card text-card-foreground px-2 py-1 rounded-full hover:underline hover:scale-105 transition-all duration-100 !text-foreground !no-underline border-input border;
   }
