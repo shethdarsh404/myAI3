@@ -119,17 +119,28 @@ function parseNutrientsFromText(text: string | undefined | null) {
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
-type TodayLog = { dateIso: string; kcal: number; protein: number; carbs: number; fat: number; };
+// NOTE: changed stored field name from `carbs` -> `carbohydrates` to match assistant label
+type TodayLog = { dateIso: string; kcal: number; protein: number; carbohydrates: number; fat: number; };
 
 function loadTodayLog(): TodayLog {
   try {
     const raw = localStorage.getItem(TODAY_LOG_KEY);
-    if (!raw) return { dateIso: todayIso(), kcal: 0, protein: 0, carbs: 0, fat: 0 };
+    if (!raw) return { dateIso: todayIso(), kcal: 0, protein: 0, carbohydrates: 0, fat: 0 };
     const parsed = JSON.parse(raw) as TodayLog;
-    if (parsed.dateIso !== todayIso()) return { dateIso: todayIso(), kcal: 0, protein: 0, carbs: 0, fat: 0 };
-    return parsed;
+    // backwards compatibility: if old format used `carbs` key, migrate it
+    if ((parsed as any).carbs !== undefined && (parsed as any).carbohydrates === undefined) {
+      (parsed as any).carbohydrates = (parsed as any).carbs || 0;
+    }
+    if (parsed.dateIso !== todayIso()) return { dateIso: todayIso(), kcal: 0, protein: 0, carbohydrates: 0, fat: 0 };
+    return {
+      dateIso: parsed.dateIso,
+      kcal: parsed.kcal || 0,
+      protein: parsed.protein || 0,
+      carbohydrates: (parsed as any).carbohydrates || 0,
+      fat: parsed.fat || 0,
+    };
   } catch {
-    return { dateIso: todayIso(), kcal: 0, protein: 0, carbs: 0, fat: 0 };
+    return { dateIso: todayIso(), kcal: 0, protein: 0, carbohydrates: 0, fat: 0 };
   }
 }
 function saveTodayLog(log: TodayLog) { localStorage.setItem(TODAY_LOG_KEY, JSON.stringify(log)); }
@@ -163,7 +174,11 @@ export default function ChatPage() {
   const [durations, setDurations] = useState<Record<string, number>>(storedDefault.durations || {});
   const [savedConversations, setSavedConversations] = useState<any[]>(() => { try { const raw = localStorage.getItem(SAVED_CONVS_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }});
   const [profile, setProfile] = useState(() => { try { const raw = localStorage.getItem(PROFILE_KEY); return raw ? JSON.parse(raw) : { name: "", age: "", heightCm: "", weightKg: "", activity: "Moderate" }; } catch { return { name: "", age: "", heightCm: "", weightKg: "", activity: "Moderate" }; }});
-  const [goals, setGoals] = useState(() => { try { const raw = localStorage.getItem(GOALS_KEY); return raw ? JSON.parse(raw) : { kcal: 2000, proteinG: 120, carbsG: 300, fatG: 70 }; } catch { return { kcal: 2000, proteinG: 120, carbsG: 300, fatG: 70 }; }});
+
+  // NOTE: rename goals key carbsG -> carbohydratesG for clarity
+  const [goals, setGoals] = useState(() => { try { const raw = localStorage.getItem(GOALS_KEY); if (!raw) return { kcal: 2000, proteinG: 120, carbohydratesG: 300, fatG: 70 }; const parsed = JSON.parse(raw); // migrate old carbsG if present
+    if (parsed.carbsG !== undefined && parsed.carbohydratesG === undefined) parsed.carbohydratesG = parsed.carbsG;
+    return { kcal: parsed.kcal ?? 2000, proteinG: parsed.proteinG ?? 120, carbohydratesG: parsed.carbohydratesG ?? 300, fatG: parsed.fatG ?? 70 }; } catch { return { kcal: 2000, proteinG: 120, carbohydratesG: 300, fatG: 70 }; }});
   const [todayLog, setTodayLog] = useState<TodayLog>(() => loadTodayLog());
 
   const { messages, sendMessage, status, stop, setMessages } = useChat({ messages: initialMessages });
@@ -199,9 +214,16 @@ export default function ChatPage() {
 
   // today log helpers
   function persistToday(next: TodayLog) { setTodayLog(next); saveTodayLog(next); }
+  // Accept `carbs` param from parser / UI, but store as `carbohydrates` in the persisted today log
   function addToToday({ kcal = 0, protein = 0, carbs = 0, fat = 0 }: { kcal?: number; protein?: number; carbs?: number; fat?: number }) {
     const cur = loadTodayLog();
-    const next = { dateIso: todayIso(), kcal: Math.round((cur.kcal || 0) + (kcal || 0)), protein: Math.round((cur.protein || 0) + (protein || 0)), carbs: Math.round((cur.carbs || 0) + (carbs || 0)), fat: Math.round((cur.fat || 0) + (fat || 0)) };
+    const next: TodayLog = {
+      dateIso: todayIso(),
+      kcal: Math.round((cur.kcal || 0) + (kcal || 0)),
+      protein: Math.round((cur.protein || 0) + (protein || 0)),
+      carbohydrates: Math.round((cur.carbohydrates || 0) + (carbs || 0)),
+      fat: Math.round((cur.fat || 0) + (fat || 0))
+    };
     persistToday(next);
     toast.success("Added to today's log");
   }
@@ -226,6 +248,7 @@ export default function ChatPage() {
     } else {
       if (!kcal) kcal = (protein || 0) * 4 + (carbs || 0) * 4 + (fat || 0) * 9;
     }
+    // pass carbs (from parser) into addToToday which stores it under 'carbohydrates'
     addToToday({ kcal: kcal || 0, protein: protein || 0, carbs: carbs || 0, fat: fat || 0 });
   }
 
@@ -508,8 +531,8 @@ export default function ChatPage() {
                     <ProgressBar value={todayLog.protein} target={goals.proteinG} color="#F97316" />
                   </div>
                   <div>
-                    <div className="text-xs text-slate-500 mb-1">Carbs (g)</div>
-                    <ProgressBar value={todayLog.carbs} target={goals.carbsG} color="#60A5FA" />
+                    <div className="text-xs text-slate-500 mb-1">Carbohydrates (g)</div>
+                    <ProgressBar value={todayLog.carbohydrates} target={goals.carbohydratesG} color="#60A5FA" />
                   </div>
                   <div>
                     <div className="text-xs text-slate-500 mb-1">Fat (g)</div>
@@ -522,14 +545,14 @@ export default function ChatPage() {
             <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
               <label className="flex flex-col text-xs"><span className="text-slate-500">Calorie goal</span><input type="number" className="input mt-1" value={goals.kcal ?? ""} onChange={(e) => { const n = e.target.value === "" ? 0 : Number(e.target.value); setGoals({ ...goals, kcal: n }); localStorage.setItem(GOALS_KEY, JSON.stringify({ ...goals, kcal: n })); }} /></label>
               <label className="flex flex-col text-xs"><span className="text-slate-500">Protein (g)</span><input type="number" className="input mt-1" value={goals.proteinG ?? ""} onChange={(e) => { const n = e.target.value === "" ? 0 : Number(e.target.value); setGoals({ ...goals, proteinG: n }); localStorage.setItem(GOALS_KEY, JSON.stringify({ ...goals, proteinG: n })); }} /></label>
-              <label className="flex flex-col text-xs"><span className="text-slate-500">Carbs (g)</span><input type="number" className="input mt-1" value={goals.carbsG ?? ""} onChange={(e) => { const n = e.target.value === "" ? 0 : Number(e.target.value); setGoals({ ...goals, carbsG: n }); localStorage.setItem(GOALS_KEY, JSON.stringify({ ...goals, carbsG: n })); }} /></label>
+              <label className="flex flex-col text-xs"><span className="text-slate-500">Carbohydrates (g)</span><input type="number" className="input mt-1" value={goals.carbohydratesG ?? ""} onChange={(e) => { const n = e.target.value === "" ? 0 : Number(e.target.value); setGoals({ ...goals, carbohydratesG: n }); localStorage.setItem(GOALS_KEY, JSON.stringify({ ...goals, carbohydratesG: n })); }} /></label>
               <label className="flex flex-col text-xs"><span className="text-slate-500">Fat (g)</span><input type="number" className="input mt-1" value={goals.fatG ?? ""} onChange={(e) => { const n = e.target.value === "" ? 0 : Number(e.target.value); setGoals({ ...goals, fatG: n }); localStorage.setItem(GOALS_KEY, JSON.stringify({ ...goals, fatG: n })); }} /></label>
             </div>
 
             <div className="mt-3 flex gap-2">
               <button className="px-3 py-2 rounded-md bg-emerald-700 text-white" onClick={() => addComposerToLog()}>Add Data from Prompt</button>
               <button className="px-3 py-2 rounded-md border border-slate-200" onClick={() => addLastAssistantToLog()}>Add Last Data</button>
-              <button className="px-3 py-2 rounded-md text-sm" onClick={() => { const empty = { dateIso: todayIso(), kcal: 0, protein: 0, carbs: 0, fat: 0 }; persistToday(empty); toast.success("Reset"); }}>Reset</button>
+              <button className="px-3 py-2 rounded-md text-sm" onClick={() => { const empty = { dateIso: todayIso(), kcal: 0, protein: 0, carbohydrates: 0, fat: 0 }; persistToday(empty); toast.success("Reset"); }}>Reset</button>
             </div>
 
             {/* Suggested meals */}
