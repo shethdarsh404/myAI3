@@ -52,5 +52,5 @@ export const MODERATION_DENIAL_MESSAGE_VIOLENCE = "I can't discuss violent conte
 export const MODERATION_DENIAL_MESSAGE_VIOLENCE_GRAPHIC = "I can't discuss graphic violent content. Please ask something else.";
 export const MODERATION_DENIAL_MESSAGE_DEFAULT = "Your message violates our guidelines. I can't answer that.";
 
-export const PINECONE_TOP_K = 40;
+export const PINECONE_TOP_K = 20;
 export const PINECONE_INDEX_NAME = "my-ai";
